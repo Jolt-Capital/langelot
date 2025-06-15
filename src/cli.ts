@@ -14,10 +14,7 @@ interface CLIOptions {
   maxTokens?: number;
   context?: string;
   verbose?: boolean;
-  webSearch?: boolean;
-  librarian?: boolean;
-  files?: string;
-  workerType?: 'simple' | 'search' | 'librarian' | 'auto';
+  documents?: string;
 }
 
 program
@@ -35,10 +32,7 @@ program
   .option('--max-tokens <tokens>', 'Maximum tokens per LLM call', '1500')
   .option('-c, --context <context>', 'Additional context as JSON string')
   .option('-v, --verbose', 'Verbose output showing all agent interactions and detailed logs')
-  .option('-w, --web-search', 'Enable web search workers for real-time information')
-  .option('-l, --librarian', 'Enable librarian workers with document analysis')
-  .option('-f, --files <files>', 'Comma-separated list of file paths for librarian workers')
-  .option('--worker-type <type>', 'Specify worker type: simple, search, librarian, or auto', 'auto')
+  .option('-d, --documents <documents>', 'Comma-separated list of document paths for analysis')
   .action(async (task: string, options: CLIOptions) => {
     try {
       console.log(chalk.blue('🚀 Starting Langelot orchestration...\n'));
@@ -60,18 +54,10 @@ program
         }
       }
 
-      // Parse files if provided
-      let librarianFiles: string[] = [];
-      if (options.files) {
-        librarianFiles = options.files.split(',').map(f => f.trim());
-      }
-
-      // Validate worker type combinations
-      if (options.workerType === 'librarian' || options.librarian) {
-        if (librarianFiles.length === 0) {
-          console.error(chalk.red('❌ Error: Librarian workers require files to be specified with --files'));
-          process.exit(1);
-        }
+      // Parse documents if provided
+      let documents: string[] = [];
+      if (options.documents) {
+        documents = options.documents.split(',').map(f => f.trim());
       }
 
       // Initialize connector and orchestrator
@@ -81,10 +67,7 @@ program
         temperature: parseFloat(String(options.temperature || '0.7')),
         maxTokens: parseInt(String(options.maxTokens || '1500')),
         context,
-        enableWebSearch: options.webSearch || false,
-        enableLibrarian: options.librarian || false,
-        librarianFiles,
-        workerType: options.workerType || 'auto',
+        documents,
       };
 
       const orchestrator = new FlexibleOrchestrator(connector, orchestratorOptions);
@@ -97,13 +80,9 @@ program
       if (options.verbose) {
         console.log(chalk.gray(`🔧 Verbose mode enabled - showing all agent interactions`));
       }
-      if (options.webSearch) {
-        console.log(chalk.gray(`🔍 Web search enabled - workers will use real-time information`));
+      if (documents.length > 0) {
+        console.log(chalk.gray(`📚 Documents available: ${documents.length} files`));
       }
-      if (options.librarian) {
-        console.log(chalk.gray(`📚 Librarian workers enabled - using ${librarianFiles.length} files`));
-      }
-      console.log(chalk.gray(`⚙️  Worker type: ${orchestratorOptions.workerType}`));
       console.log('');
 
       // Execute orchestration
@@ -148,7 +127,7 @@ program
             if (workerResult.sources && workerResult.sources.length > 0) {
               console.log(chalk.gray(`   Sources: ${workerResult.sources.length} found`));
             }
-          } else if (options.webSearch && workerResult.workerType === 'search') {
+          } else if (workerResult.workerType === 'search') {
             console.log(chalk.yellow('   📚 Fallback to training data (web search unavailable)'));
           }
           
@@ -187,14 +166,20 @@ program
         }
         console.log(chalk.cyan(`Total execution time: ${totalDuration}ms`));
         
-        if (options.webSearch) {
-          const searchResults = result.results.filter(r => r.searchPerformed);
+        // Show agent statistics
+        const searchResults = result.results.filter(r => r.searchPerformed);
+        if (searchResults.length > 0) {
           console.log(chalk.cyan(`Web searches performed: ${searchResults.length}`));
-          
-          const totalSources = result.results.reduce((sum, r) => sum + (r.sources?.length || 0), 0);
-          if (totalSources > 0) {
-            console.log(chalk.cyan(`Sources found: ${totalSources}`));
-          }
+        }
+        
+        const totalSources = result.results.reduce((sum, r) => sum + (r.sources?.length || 0), 0);
+        if (totalSources > 0) {
+          console.log(chalk.cyan(`Sources found: ${totalSources}`));
+        }
+
+        const filesAnalyzed = result.results.filter(r => r.filesUsed && r.filesUsed.length > 0);
+        if (filesAnalyzed.length > 0) {
+          console.log(chalk.cyan(`Document analyses performed: ${filesAnalyzed.length}`));
         }
         console.log('');
       }
@@ -217,15 +202,15 @@ program
     console.log(chalk.gray('for complex task execution using multiple LLM agents.'));
     console.log('');
     console.log(chalk.yellow('Features:'));
-    console.log(chalk.white('• Task decomposition into multiple approaches'));
-    console.log(chalk.white('• Multiple worker types:'));
-    console.log(chalk.white('  - Simple workers (gpt-4.1-mini) for basic tasks'));
-    console.log(chalk.white('  - Search workers (gpt-4.1) with web search capabilities'));
-    console.log(chalk.white('  - Librarian workers (gpt-4.1) with document analysis'));
-    console.log(chalk.white('• Parallel worker execution'));
-    console.log(chalk.white('• Result synthesis'));
-    console.log(chalk.white('• Auto mode for intelligent worker selection'));
-    console.log(chalk.white('• Configurable models and parameters'));
+    console.log(chalk.white('• Intelligent task decomposition with agent selection'));
+    console.log(chalk.white('• Multiple specialized agent types:'));
+    console.log(chalk.white('  - Simple agents (gpt-4.1-mini) for reasoning tasks'));
+    console.log(chalk.white('  - Search agents (gpt-4.1) with real-time web search'));
+    console.log(chalk.white('  - Librarian agents (gpt-4.1) for document analysis'));
+    console.log(chalk.white('• Orchestrator chooses optimal agent mix per subtask'));
+    console.log(chalk.white('• Parallel mixed-agent execution'));
+    console.log(chalk.white('• Comprehensive result synthesis'));
+    console.log(chalk.white('• Document upload and analysis support'));
     console.log('');
     console.log(chalk.yellow('Requirements:'));
     console.log(chalk.white('• OPENAI_API_KEY environment variable'));

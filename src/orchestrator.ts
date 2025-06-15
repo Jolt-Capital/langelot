@@ -1,3 +1,4 @@
+import path from 'path';
 import { OpenAIConnector, LLMResponse } from './connectors/index.js';
 import { parseSubtaskStrategies, parseWorkerResults } from './utils/xml-parser.js';
 import { OrchestratorOptions, SubtaskStrategy, WorkerResult, OrchestratorResult } from './types/index.js';
@@ -14,10 +15,7 @@ export class FlexibleOrchestrator {
       maxTokens: options.maxTokens || 1500,
       temperature: options.temperature || 0.7,
       context: options.context || {},
-      enableWebSearch: options.enableWebSearch || false,
-      enableLibrarian: options.enableLibrarian || false,
-      librarianFiles: options.librarianFiles || [],
-      workerType: options.workerType || 'auto',
+      documents: options.documents || [],
     };
   }
 
@@ -26,23 +24,35 @@ export class FlexibleOrchestrator {
       ? `\n\nAdditional context: ${JSON.stringify(this.options.context, null, 2)}`
       : '';
 
-    return `You are a task orchestrator. Your job is to analyze a complex task and break it down into 2-3 distinct subtask approaches that can be handled by specialized workers.
+    const documentsInfo = this.options.documents.length > 0
+      ? `\n\nAvailable documents for analysis: ${this.options.documents.map(d => path.basename(d)).join(', ')}`
+      : '';
 
-Task: ${task}${contextInfo}
+    return `You are a task orchestrator. Your job is to analyze a complex task and break it down into 2-3 distinct subtask approaches that can be handled by specialized AI agents.
 
-Please analyze this task and generate 2-3 different approaches for tackling it. Each approach should be distinct and offer a different perspective or method.
+Task: ${task}${contextInfo}${documentsInfo}
+
+Available agent types:
+- SIMPLE: Fast, cost-effective agent (gpt-4.1-mini) for straightforward tasks that don't need real-time data or documents
+- SEARCH: Web search agent (gpt-4.1) that can access current information, news, trends, and real-time data
+- LIBRARIAN: Document analysis agent (gpt-4.1) that can analyze uploaded documents${this.options.documents.length > 0 ? ' (documents are available)' : ' (no documents provided)'}
+
+Please analyze this task and generate 2-3 different approaches. For each approach, choose the most appropriate agent type based on the requirements.
 
 Format your response as follows:
 <approach>Brief name for approach 1</approach>
-<description>Detailed description of what this approach should accomplish and how</description>
+<agent>simple|search|librarian</agent>
+<description>Detailed description of what this approach should accomplish and why this agent type is best suited for it</description>
 
 <approach>Brief name for approach 2</approach>
-<description>Detailed description of what this approach should accomplish and how</description>
+<agent>simple|search|librarian</agent>
+<description>Detailed description of what this approach should accomplish and why this agent type is best suited for it</description>
 
 <approach>Brief name for approach 3</approach>
-<description>Detailed description of what this approach should accomplish and how</description>
+<agent>simple|search|librarian</agent>
+<description>Detailed description of what this approach should accomplish and why this agent type is best suited for it</description>
 
-Focus on creating complementary approaches that together will provide a comprehensive solution to the task.`;
+Focus on creating complementary approaches that together will provide a comprehensive solution. Choose agent types strategically - use SEARCH for current information, LIBRARIAN for document analysis, and SIMPLE for reasoning tasks.`;
   }
 
   private getWorkerPrompt(task: string, approach: string, description: string): string {
@@ -87,7 +97,7 @@ Provide your synthesis:`;
 
   async orchestrate(task: string): Promise<OrchestratorResult> {
     try {
-      // Step 1: Generate subtask strategies
+      // Step 1: Generate subtask strategies with agent type selection
       const orchestratorPrompt = this.getOrchestratorPrompt(task);
       const orchestratorResponse = await this.connector.llmCall(
         orchestratorPrompt,
@@ -103,19 +113,8 @@ Provide your synthesis:`;
         throw new Error('Failed to generate subtask strategies');
       }
 
-      // Step 2: Execute worker tasks in parallel based on worker type
-      let results: WorkerResult[];
-      
-      if (this.options.workerType === 'librarian' || this.options.enableLibrarian) {
-        results = await this.executeLibrarianWorkers(strategies, task);
-      } else if (this.options.workerType === 'search' || this.options.enableWebSearch) {
-        results = await this.executeWebSearchWorkers(strategies, task);
-      } else if (this.options.workerType === 'simple') {
-        results = await this.executeSimpleWorkers(strategies, task);
-      } else {
-        // Auto mode: choose best worker type based on task
-        results = await this.executeAutoWorkers(strategies, task);
-      }
+      // Step 2: Execute mixed worker tasks in parallel based on chosen agent types
+      const results = await this.executeMixedWorkers(strategies, task);
 
       // Step 3: Synthesize results
       const synthesisPrompt = this.getSynthesisPrompt(task, results);
@@ -139,92 +138,93 @@ Provide your synthesis:`;
     }
   }
 
-  private async executeLibrarianWorkers(strategies: SubtaskStrategy[], task: string): Promise<WorkerResult[]> {
-    if (this.options.librarianFiles.length === 0) {
-      throw new Error('Librarian workers require files to be specified');
+  private async executeMixedWorkers(strategies: SubtaskStrategy[], task: string): Promise<WorkerResult[]> {
+    // Initialize workers once, reuse for multiple tasks
+    let librarianWorker: LibrarianWorker | null = null;
+    let webSearchWorker: WebSearchWorker | null = null;
+    let simpleWorker: SimpleWorker | null = null;
+
+    // Check if we need librarian worker and validate documents
+    const needsLibrarian = strategies.some(s => s.agentType === 'librarian');
+    if (needsLibrarian && this.options.documents.length === 0) {
+      console.warn('Librarian agent requested but no documents provided. Converting to simple agent.');
     }
 
-    const librarianWorker = new LibrarianWorker(this.connector, {
-      model: this.options.model,
-      maxTokens: this.options.maxTokens,
-      temperature: this.options.temperature,
-      filePaths: this.options.librarianFiles,
-    });
-
-    await librarianWorker.initialize();
-
-    const librarianPromises = strategies.map(strategy =>
-      librarianWorker.execute(task, strategy.approach, strategy.description, this.options.context)
-    );
-
-    const librarianResults = await Promise.all(librarianPromises);
-    return librarianResults.map(result => ({
-      approach: result.approach,
-      result: result.result,
-      filesUsed: result.filesUsed,
-      workerType: 'librarian' as const,
-      model: result.model,
-      duration: result.duration,
-    }));
-  }
-
-  private async executeWebSearchWorkers(strategies: SubtaskStrategy[], task: string): Promise<WorkerResult[]> {
-    const webSearchWorker = new WebSearchWorker(this.connector, {
-      model: this.options.model,
-    });
-
-    const webSearchPromises = strategies.map(strategy =>
-      webSearchWorker.execute(task, strategy.approach, strategy.description, this.options.context)
-    );
-
-    const webSearchResults = await Promise.all(webSearchPromises);
-    return webSearchResults.map(result => ({
-      approach: result.approach,
-      result: result.result,
-      sources: result.sources,
-      searchPerformed: result.searchPerformed,
-      workerType: 'search' as const,
-    }));
-  }
-
-  private async executeSimpleWorkers(strategies: SubtaskStrategy[], task: string): Promise<WorkerResult[]> {
-    const simpleWorker = new SimpleWorker(this.connector, {
-      model: 'gpt-4.1-mini',
-      maxTokens: this.options.maxTokens,
-      temperature: this.options.temperature,
-    });
-
-    const simplePromises = strategies.map(strategy =>
-      simpleWorker.execute(task, strategy.approach, strategy.description, this.options.context)
-    );
-
-    const simpleResults = await Promise.all(simplePromises);
-    return simpleResults.map(result => ({
-      approach: result.approach,
-      result: result.result,
-      workerType: 'simple' as const,
-      model: result.model,
-      duration: result.duration,
-    }));
-  }
-
-  private async executeAutoWorkers(strategies: SubtaskStrategy[], task: string): Promise<WorkerResult[]> {
-    // Auto mode logic: determine best worker type based on task characteristics
-    const taskLower = task.toLowerCase();
-    const needsFiles = this.options.librarianFiles.length > 0;
-    const needsWebSearch = /\b(current|latest|recent|today|now|2024|2025)\b/.test(taskLower) ||
-                          /\b(news|price|stock|weather|trends)\b/.test(taskLower);
-    const isSimpleTask = taskLower.length < 100 && !/\b(complex|detailed|comprehensive|analysis)\b/.test(taskLower);
-
-    if (needsFiles) {
-      return await this.executeLibrarianWorkers(strategies, task);
-    } else if (needsWebSearch) {
-      return await this.executeWebSearchWorkers(strategies, task);
-    } else if (isSimpleTask) {
-      return await this.executeSimpleWorkers(strategies, task);
-    } else {
-      // Default to web search for complex tasks
-      return await this.executeWebSearchWorkers(strategies, task);
+    // Initialize librarian worker if needed and documents are available
+    if (needsLibrarian && this.options.documents.length > 0) {
+      try {
+        librarianWorker = new LibrarianWorker(this.connector, {
+          model: this.options.model,
+          maxTokens: this.options.maxTokens,
+          temperature: this.options.temperature,
+          filePaths: this.options.documents,
+        });
+        await librarianWorker.initialize();
+      } catch (error) {
+        console.warn(`Librarian worker initialization failed: ${error}. Converting librarian tasks to simple agent.`);
+        librarianWorker = null;
+      }
     }
+
+    // Execute all strategies in parallel
+    const executionPromises = strategies.map(async (strategy): Promise<WorkerResult> => {
+      let agentType = strategy.agentType;
+      
+      // Fallback to simple if librarian requested but no documents or initialization failed
+      if (agentType === 'librarian' && (this.options.documents.length === 0 || !librarianWorker)) {
+        agentType = 'simple';
+      }
+
+      switch (agentType) {
+        case 'librarian':
+          if (!librarianWorker) {
+            throw new Error('Librarian worker not initialized');
+          }
+          const libResult = await librarianWorker.execute(task, strategy.approach, strategy.description, this.options.context);
+          return {
+            approach: libResult.approach,
+            result: libResult.result,
+            filesUsed: libResult.filesUsed,
+            workerType: 'librarian' as const,
+            model: libResult.model,
+            duration: libResult.duration,
+          };
+
+        case 'search':
+          if (!webSearchWorker) {
+            webSearchWorker = new WebSearchWorker(this.connector, {
+              model: this.options.model,
+            });
+          }
+          const searchResult = await webSearchWorker.execute(task, strategy.approach, strategy.description, this.options.context);
+          return {
+            approach: searchResult.approach,
+            result: searchResult.result,
+            sources: searchResult.sources,
+            searchPerformed: searchResult.searchPerformed,
+            workerType: 'search' as const,
+          };
+
+        case 'simple':
+        default:
+          if (!simpleWorker) {
+            simpleWorker = new SimpleWorker(this.connector, {
+              model: 'gpt-4.1-mini',
+              maxTokens: this.options.maxTokens,
+              temperature: this.options.temperature,
+            });
+          }
+          const simpleResult = await simpleWorker.execute(task, strategy.approach, strategy.description, this.options.context);
+          return {
+            approach: simpleResult.approach,
+            result: simpleResult.result,
+            workerType: 'simple' as const,
+            model: simpleResult.model,
+            duration: simpleResult.duration,
+          };
+      }
+    });
+
+    return await Promise.all(executionPromises);
   }
 }

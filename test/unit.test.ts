@@ -48,11 +48,13 @@ describe('XML Parser Utils', () => {
   });
 
   describe('parseSubtaskStrategies', () => {
-    it('should parse approach and description pairs', () => {
+    it('should parse approach, agent, and description triplets', () => {
       const text = `
         <approach>Direct Research</approach>
+        <agent>search</agent>
         <description>Search for founder information directly</description>
         <approach>Company History</approach>
+        <agent>simple</agent>
         <description>Look at company history and founding story</description>
       `;
       
@@ -60,23 +62,39 @@ describe('XML Parser Utils', () => {
       expect(result).toHaveLength(2);
       expect(result[0]).toEqual({
         approach: 'Direct Research',
+        agentType: 'search',
         description: 'Search for founder information directly'
       });
       expect(result[1]).toEqual({
         approach: 'Company History',
+        agentType: 'simple',
         description: 'Look at company history and founding story'
       });
     });
 
-    it('should handle mismatched approach/description counts', () => {
+    it('should handle mismatched approach/agent/description counts', () => {
       const text = `
         <approach>First</approach>
+        <agent>simple</agent>
         <description>First desc</description>
         <approach>Second</approach>
+        <agent>search</agent>
       `;
       
       const result = parseSubtaskStrategies(text);
-      expect(result).toHaveLength(1); // Only complete pairs
+      expect(result).toHaveLength(1); // Only complete triplets
+    });
+
+    it('should handle invalid agent types by defaulting to simple', () => {
+      const text = `
+        <approach>Test Approach</approach>
+        <agent>invalid_type</agent>
+        <description>Test description</description>
+      `;
+      
+      const result = parseSubtaskStrategies(text);
+      expect(result).toHaveLength(1);
+      expect(result[0].agentType).toBe('simple');
     });
   });
 

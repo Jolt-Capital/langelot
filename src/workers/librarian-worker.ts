@@ -62,10 +62,10 @@ export class LibrarianWorker {
     const fileName = path.basename(filePath);
     const extension = path.extname(filePath).toLowerCase();
     
-    // Check if file type is supported (PDF, text files, etc.)
-    const supportedExtensions = ['.pdf', '.txt', '.md', '.doc', '.docx'];
+    // Check if file type is supported (mainly PDF files for OpenAI)
+    const supportedExtensions = ['.pdf'];
     if (!supportedExtensions.includes(extension)) {
-      throw new Error(`Unsupported file type: ${extension}. Supported types: ${supportedExtensions.join(', ')}`);
+      throw new Error(`Unsupported file type: ${extension}. OpenAI currently supports: ${supportedExtensions.join(', ')}`);
     }
 
     try {

@@ -18,19 +18,29 @@ export function extractSingleXml(text: string, tag: string): string | null {
 export interface SubtaskStrategy {
   approach: string;
   description: string;
+  agentType: 'simple' | 'search' | 'librarian';
 }
 
 export function parseSubtaskStrategies(text: string): SubtaskStrategy[] {
   const approaches = extractXml(text, 'approach');
   const descriptions = extractXml(text, 'description');
+  const agents = extractXml(text, 'agent');
   
   const strategies: SubtaskStrategy[] = [];
-  const minLength = Math.min(approaches.length, descriptions.length);
+  const minLength = Math.min(approaches.length, descriptions.length, agents.length);
   
   for (let i = 0; i < minLength; i++) {
+    const agentType = agents[i].toLowerCase() as 'simple' | 'search' | 'librarian';
+    
+    // Validate agent type
+    if (!['simple', 'search', 'librarian'].includes(agentType)) {
+      console.warn(`Invalid agent type "${agents[i]}", defaulting to "simple"`);
+    }
+    
     strategies.push({
       approach: approaches[i],
       description: descriptions[i],
+      agentType: ['simple', 'search', 'librarian'].includes(agentType) ? agentType : 'simple',
     });
   }
   

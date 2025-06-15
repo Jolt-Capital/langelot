@@ -3,10 +3,7 @@ export interface OrchestratorOptions {
   maxTokens?: number;
   temperature?: number;
   context?: Record<string, any>;
-  enableWebSearch?: boolean;
-  enableLibrarian?: boolean;
-  librarianFiles?: string[];
-  workerType?: 'simple' | 'search' | 'librarian' | 'auto';
+  documents?: string[];
 }
 
 export interface WorkerOptions {
@@ -18,6 +15,7 @@ export interface WorkerOptions {
 export interface SubtaskStrategy {
   approach: string;
   description: string;
+  agentType: 'simple' | 'search' | 'librarian';
 }
 
 export interface WorkerResult {
