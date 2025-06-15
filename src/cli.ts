@@ -14,6 +14,7 @@ interface CLIOptions {
   maxTokens?: number;
   context?: string;
   verbose?: boolean;
+  webSearch?: boolean;
 }
 
 program
@@ -31,6 +32,7 @@ program
   .option('--max-tokens <tokens>', 'Maximum tokens per LLM call', '1500')
   .option('-c, --context <context>', 'Additional context as JSON string')
   .option('-v, --verbose', 'Verbose output showing all agent interactions and detailed logs')
+  .option('-w, --web-search', 'Enable web search workers for real-time information')
   .action(async (task: string, options: CLIOptions) => {
     try {
       console.log(chalk.blue('🚀 Starting Langelot orchestration...\n'));
@@ -59,6 +61,7 @@ program
         temperature: parseFloat(String(options.temperature || '0.7')),
         maxTokens: parseInt(String(options.maxTokens || '1500')),
         context,
+        enableWebSearch: options.webSearch || false,
       };
 
       const orchestrator = new FlexibleOrchestrator(connector, orchestratorOptions);
@@ -70,6 +73,9 @@ program
       console.log(chalk.gray(`🤖 Model: ${orchestratorOptions.model}`));
       if (options.verbose) {
         console.log(chalk.gray(`🔧 Verbose mode enabled - showing all agent interactions`));
+      }
+      if (options.webSearch) {
+        console.log(chalk.gray(`🔍 Web search enabled - workers will use real-time information`));
       }
       console.log('');
 
@@ -85,10 +91,40 @@ program
         console.log('');
       }
 
+      // Show worker results in verbose mode
+      if (options.verbose) {
+        console.log(chalk.yellow('\n⚙️  Worker Results:'));
+        result.results.forEach((workerResult, index) => {
+          console.log(chalk.cyan(`\n${index + 1}. ${workerResult.approach}:`));
+          
+          if (workerResult.searchPerformed) {
+            console.log(chalk.green('   🔍 Web search performed'));
+            if (workerResult.sources && workerResult.sources.length > 0) {
+              console.log(chalk.gray(`   Sources: ${workerResult.sources.length} found`));
+            }
+          } else if (options.webSearch) {
+            console.log(chalk.yellow('   📚 Fallback to training data (web search unavailable)'));
+          }
+          
+          console.log(chalk.white('   ' + workerResult.result.split('\n').join('\n   ')));
+          
+          if (workerResult.sources && workerResult.sources.length > 0) {
+            console.log(chalk.gray('\n   Sources:'));
+            workerResult.sources.forEach((source, sourceIndex) => {
+              console.log(chalk.gray(`   ${sourceIndex + 1}. ${source.title} - ${source.url}`));
+              if (source.snippet) {
+                console.log(chalk.gray(`      ${source.snippet}`));
+              }
+            });
+          }
+        });
+        console.log('');
+      }
+
       // Show call logs summary if verbose
       if (options.verbose) {
         const logs = connector.getCallLogs();
-        console.log(chalk.yellow('\n📊 Agent Interaction Summary:'));
+        console.log(chalk.yellow('📊 Agent Interaction Summary:'));
         console.log(chalk.cyan(`Total LLM calls: ${logs.length}`));
         
         const totalTokens = logs.reduce((sum, log) => sum + (log.usage?.total_tokens || 0), 0);
@@ -98,6 +134,16 @@ program
           console.log(chalk.cyan(`Total tokens used: ${totalTokens}`));
         }
         console.log(chalk.cyan(`Total execution time: ${totalDuration}ms`));
+        
+        if (options.webSearch) {
+          const searchResults = result.results.filter(r => r.searchPerformed);
+          console.log(chalk.cyan(`Web searches performed: ${searchResults.length}`));
+          
+          const totalSources = result.results.reduce((sum, r) => sum + (r.sources?.length || 0), 0);
+          if (totalSources > 0) {
+            console.log(chalk.cyan(`Sources found: ${totalSources}`));
+          }
+        }
         console.log('');
       }
 

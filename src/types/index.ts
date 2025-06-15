@@ -3,6 +3,7 @@ export interface OrchestratorOptions {
   maxTokens?: number;
   temperature?: number;
   context?: Record<string, any>;
+  enableWebSearch?: boolean;
 }
 
 export interface SubtaskStrategy {
@@ -13,6 +14,12 @@ export interface SubtaskStrategy {
 export interface WorkerResult {
   approach: string;
   result: string;
+  sources?: Array<{
+    title: string;
+    url: string;
+    snippet?: string;
+  }>;
+  searchPerformed?: boolean;
 }
 
 export interface OrchestratorResult {

@@ -10,6 +10,21 @@ export interface LLMResponse {
   };
 }
 
+export interface WebSearchResponse {
+  content: string;
+  model: string;
+  sources?: Array<{
+    title: string;
+    url: string;
+    snippet?: string;
+  }>;
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
+}
+
 export interface LLMCallLog {
   timestamp: Date;
   prompt: string;
@@ -49,6 +64,88 @@ export class OpenAIConnector {
     this.callLogs = [];
   }
 
+  async webSearchCall(
+    input: string,
+    model: string = 'gpt-4.1',
+    role?: string
+  ): Promise<WebSearchResponse> {
+    const startTime = Date.now();
+    const timestamp = new Date();
+
+    if (this.verbose) {
+      console.log(`\n🔍 ${role || 'WEB-SEARCH'} Call [${timestamp.toISOString()}]`);
+      console.log(`Model: ${model} | Tool: web_search_preview`);
+      console.log(`Input (${input.length} chars):`);
+      console.log('─'.repeat(50));
+      console.log(input);
+      console.log('─'.repeat(50));
+    }
+
+    try {
+      // Use the responses.create method with web_search_preview tool
+      const response = await this.client.responses.create({
+        model,
+        tools: [{ type: "web_search_preview" }],
+        input,
+      });
+      if (this.verbose) {
+        console.log('Response:');
+        console.log(response);
+      }
+
+      const duration = Date.now() - startTime;
+      const responseContent = response.output_text;
+      
+      // Extract sources if available
+      const sources = response.sources || [];
+      
+      const usage = response.usage ? {
+        prompt_tokens: response.usage.prompt_tokens,
+        completion_tokens: response.usage.completion_tokens,
+        total_tokens: response.usage.total_tokens,
+      } : undefined;
+
+      // Log the call
+      const callLog: LLMCallLog = {
+        timestamp,
+        prompt: input,
+        model: response.model || model,
+        maxTokens: 0, // Not applicable for responses API
+        temperature: 0, // Not applicable for responses API
+        response: responseContent,
+        usage,
+        duration,
+      };
+      this.callLogs.push(callLog);
+
+      if (this.verbose) {
+        console.log(`\n✅ ${role || 'WEB-SEARCH'} Response (${duration}ms):`);
+        if (usage) {
+          console.log(`Tokens: ${usage.prompt_tokens} + ${usage.completion_tokens} = ${usage.total_tokens}`);
+        }
+        if (sources.length > 0) {
+          console.log(`Sources found: ${sources.length}`);
+        }
+        console.log('─'.repeat(50));
+        console.log(responseContent);
+        console.log('─'.repeat(50));
+      }
+
+      return {
+        content: responseContent,
+        model: response.model || model,
+        sources,
+        usage,
+      };
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      if (this.verbose) {
+        console.log(`\n❌ ${role || 'WEB-SEARCH'} Error (${duration}ms): ${error}`);
+      }
+      throw new Error(`OpenAI Web Search API call failed: ${error}`);
+    }
+  }
+
   async llmCall(
     prompt: string,
     model: string = 'gpt-4.1',
@@ -69,20 +166,18 @@ export class OpenAIConnector {
     }
 
     try {
-      const response = await this.client.chat.completions.create({
+      const response = await this.client.responses.create({
         model,
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: maxTokens,
+        input: prompt,
         temperature,
       });
 
-      const choice = response.choices[0];
-      if (!choice?.message?.content) {
+      const responseContent = response.output_text;
+      if (!responseContent) {
         throw new Error('No content received from OpenAI');
       }
 
       const duration = Date.now() - startTime;
-      const responseContent = choice.message.content;
       const usage = response.usage ? {
         prompt_tokens: response.usage.prompt_tokens,
         completion_tokens: response.usage.completion_tokens,
@@ -93,7 +188,7 @@ export class OpenAIConnector {
       const callLog: LLMCallLog = {
         timestamp,
         prompt,
-        model: response.model,
+        model: response.model || model,
         maxTokens,
         temperature,
         response: responseContent,
@@ -114,7 +209,7 @@ export class OpenAIConnector {
 
       return {
         content: responseContent,
-        model: response.model,
+        model: response.model || model,
         usage,
       };
     } catch (error) {

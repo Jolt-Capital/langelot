@@ -1,6 +1,7 @@
 import { OpenAIConnector, LLMResponse } from './connectors/index.js';
 import { parseSubtaskStrategies, parseWorkerResults } from './utils/xml-parser.js';
 import { OrchestratorOptions, SubtaskStrategy, WorkerResult, OrchestratorResult } from './types/index.js';
+import { WebSearchWorker, WebSearchResult } from './workers/index.js';
 
 export class FlexibleOrchestrator {
   private connector: OpenAIConnector;
@@ -13,6 +14,7 @@ export class FlexibleOrchestrator {
       maxTokens: options.maxTokens || 1500,
       temperature: options.temperature || 0.7,
       context: options.context || {},
+      enableWebSearch: options.enableWebSearch || false,
     };
   }
 
@@ -99,21 +101,43 @@ Provide your synthesis:`;
       }
 
       // Step 2: Execute worker tasks in parallel
-      const workerPromises = strategies.map((strategy, index) =>
-        this.connector.llmCall(
-          this.getWorkerPrompt(task, strategy.approach, strategy.description),
-          this.options.model,
-          this.options.maxTokens,
-          this.options.temperature,
-          `WORKER-${index + 1} (${strategy.approach})`
-        )
-      );
+      let results: WorkerResult[];
+      
+      if (this.options.enableWebSearch) {
+        // Use web search workers
+        const webSearchWorker = new WebSearchWorker(this.connector, {
+          model: this.options.model,
+        });
 
-      const workerResponses = await Promise.all(workerPromises);
-      const results = parseWorkerResults(
-        workerResponses.map(r => r.content),
-        strategies.map(s => s.approach)
-      );
+        const webSearchPromises = strategies.map(strategy =>
+          webSearchWorker.execute(task, strategy.approach, strategy.description, this.options.context)
+        );
+
+        const webSearchResults = await Promise.all(webSearchPromises);
+        results = webSearchResults.map(result => ({
+          approach: result.approach,
+          result: result.result,
+          sources: result.sources,
+          searchPerformed: result.searchPerformed,
+        }));
+      } else {
+        // Use regular workers
+        const workerPromises = strategies.map((strategy, index) =>
+          this.connector.llmCall(
+            this.getWorkerPrompt(task, strategy.approach, strategy.description),
+            this.options.model,
+            this.options.maxTokens,
+            this.options.temperature,
+            `WORKER-${index + 1} (${strategy.approach})`
+          )
+        );
+
+        const workerResponses = await Promise.all(workerPromises);
+        results = parseWorkerResults(
+          workerResponses.map(r => r.content),
+          strategies.map(s => s.approach)
+        );
+      }
 
       // Step 3: Synthesize results
       const synthesisPrompt = this.getSynthesisPrompt(task, results);
