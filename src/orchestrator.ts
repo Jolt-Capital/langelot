@@ -88,7 +88,8 @@ Provide your synthesis:`;
         orchestratorPrompt,
         this.options.model,
         this.options.maxTokens,
-        this.options.temperature
+        this.options.temperature,
+        'ORCHESTRATOR'
       );
 
       const strategies = parseSubtaskStrategies(orchestratorResponse.content);
@@ -98,12 +99,13 @@ Provide your synthesis:`;
       }
 
       // Step 2: Execute worker tasks in parallel
-      const workerPromises = strategies.map(strategy =>
+      const workerPromises = strategies.map((strategy, index) =>
         this.connector.llmCall(
           this.getWorkerPrompt(task, strategy.approach, strategy.description),
           this.options.model,
           this.options.maxTokens,
-          this.options.temperature
+          this.options.temperature,
+          `WORKER-${index + 1} (${strategy.approach})`
         )
       );
 
@@ -119,7 +121,8 @@ Provide your synthesis:`;
         synthesisPrompt,
         this.options.model,
         this.options.maxTokens,
-        this.options.temperature
+        this.options.temperature,
+        'SYNTHESIZER'
       );
 
       return {

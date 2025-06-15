@@ -30,7 +30,7 @@ program
   .option('-t, --temperature <temperature>', 'Temperature for LLM calls', '0.7')
   .option('--max-tokens <tokens>', 'Maximum tokens per LLM call', '1500')
   .option('-c, --context <context>', 'Additional context as JSON string')
-  .option('-v, --verbose', 'Verbose output showing intermediate steps')
+  .option('-v, --verbose', 'Verbose output showing all agent interactions and detailed logs')
   .action(async (task: string, options: CLIOptions) => {
     try {
       console.log(chalk.blue('🚀 Starting Langelot orchestration...\n'));
@@ -53,7 +53,7 @@ program
       }
 
       // Initialize connector and orchestrator
-      const connector = new OpenAIConnector();
+      const connector = new OpenAIConnector(undefined, options.verbose);
       const orchestratorOptions: OrchestratorOptions = {
         model: options.model || 'gpt-4',
         temperature: parseFloat(String(options.temperature || '0.7')),
@@ -68,28 +68,37 @@ program
         console.log(chalk.gray(`📝 Context: ${JSON.stringify(context, null, 2)}`));
       }
       console.log(chalk.gray(`🤖 Model: ${orchestratorOptions.model}`));
+      if (options.verbose) {
+        console.log(chalk.gray(`🔧 Verbose mode enabled - showing all agent interactions`));
+      }
       console.log('');
 
       // Execute orchestration
       const result = await orchestrator.orchestrate(task);
 
-      // Display results
-      console.log(chalk.yellow('🔍 Generated Strategies:'));
-      result.strategies.forEach((strategy, index) => {
-        console.log(chalk.cyan(`${index + 1}. ${strategy.approach}`));
-        if (options.verbose) {
-          console.log(chalk.gray(`   ${strategy.description}`));
-        }
-      });
-      console.log('');
-
-      if (options.verbose) {
-        console.log(chalk.yellow('⚙️  Worker Results:'));
-        result.results.forEach((workerResult, index) => {
-          console.log(chalk.cyan(`${index + 1}. ${workerResult.approach}:`));
-          console.log(chalk.white(workerResult.result));
-          console.log('');
+      // Display summary (non-verbose output)
+      if (!options.verbose) {
+        console.log(chalk.yellow('🔍 Generated Strategies:'));
+        result.strategies.forEach((strategy, index) => {
+          console.log(chalk.cyan(`${index + 1}. ${strategy.approach}`));
         });
+        console.log('');
+      }
+
+      // Show call logs summary if verbose
+      if (options.verbose) {
+        const logs = connector.getCallLogs();
+        console.log(chalk.yellow('\n📊 Agent Interaction Summary:'));
+        console.log(chalk.cyan(`Total LLM calls: ${logs.length}`));
+        
+        const totalTokens = logs.reduce((sum, log) => sum + (log.usage?.total_tokens || 0), 0);
+        const totalDuration = logs.reduce((sum, log) => sum + log.duration, 0);
+        
+        if (totalTokens > 0) {
+          console.log(chalk.cyan(`Total tokens used: ${totalTokens}`));
+        }
+        console.log(chalk.cyan(`Total execution time: ${totalDuration}ms`));
+        console.log('');
       }
 
       console.log(chalk.green('✨ Final Synthesis:'));
