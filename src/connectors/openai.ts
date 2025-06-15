@@ -1,4 +1,5 @@
 import OpenAI from 'openai';
+import fs from 'fs';
 
 export interface LLMResponse {
   content: string;
@@ -8,6 +9,15 @@ export interface LLMResponse {
     completion_tokens: number;
     total_tokens: number;
   };
+}
+
+export interface FileUploadResponse {
+  id: string;
+  object: string;
+  bytes: number;
+  created_at: number;
+  filename: string;
+  purpose: string;
 }
 
 export interface WebSearchResponse {
@@ -96,13 +106,13 @@ export class OpenAIConnector {
       const duration = Date.now() - startTime;
       const responseContent = response.output_text;
       
-      // Extract sources if available
-      const sources = response.sources || [];
+      // Extract sources if available (may not be present in all response types)
+      const sources = (response as any).sources || [];
       
       const usage = response.usage ? {
-        prompt_tokens: response.usage.prompt_tokens,
-        completion_tokens: response.usage.completion_tokens,
-        total_tokens: response.usage.total_tokens,
+        prompt_tokens: (response.usage as any).prompt_tokens || 0,
+        completion_tokens: (response.usage as any).completion_tokens || 0,
+        total_tokens: (response.usage as any).total_tokens || 0,
       } : undefined;
 
       // Log the call
@@ -179,9 +189,9 @@ export class OpenAIConnector {
 
       const duration = Date.now() - startTime;
       const usage = response.usage ? {
-        prompt_tokens: response.usage.prompt_tokens,
-        completion_tokens: response.usage.completion_tokens,
-        total_tokens: response.usage.total_tokens,
+        prompt_tokens: (response.usage as any).prompt_tokens || 0,
+        completion_tokens: (response.usage as any).completion_tokens || 0,
+        total_tokens: (response.usage as any).total_tokens || 0,
       } : undefined;
 
       // Log the call
@@ -218,6 +228,135 @@ export class OpenAIConnector {
         console.log(`\n❌ ${role || 'LLM'} Error (${duration}ms): ${error}`);
       }
       throw new Error(`OpenAI API call failed: ${error}`);
+    }
+  }
+
+  async uploadFile(filePath: string, purpose: string = 'user_data'): Promise<FileUploadResponse> {
+    const startTime = Date.now();
+    const timestamp = new Date();
+
+    if (this.verbose) {
+      console.log(`\n📁 FILE-UPLOAD Call [${timestamp.toISOString()}]`);
+      console.log(`File: ${filePath} | Purpose: ${purpose}`);
+    }
+
+    try {
+      const file = await this.client.files.create({
+        file: fs.createReadStream(filePath),
+        purpose: purpose as any,
+      });
+
+      const duration = Date.now() - startTime;
+
+      if (this.verbose) {
+        console.log(`\n✅ FILE-UPLOAD Response (${duration}ms):`);
+        console.log(`File ID: ${file.id} | Size: ${file.bytes} bytes`);
+      }
+
+      return {
+        id: file.id,
+        object: file.object,
+        bytes: file.bytes,
+        created_at: file.created_at,
+        filename: file.filename,
+        purpose: file.purpose,
+      };
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      if (this.verbose) {
+        console.log(`\n❌ FILE-UPLOAD Error (${duration}ms): ${error}`);
+      }
+      throw new Error(`OpenAI file upload failed: ${error}`);
+    }
+  }
+
+  async fileBasedCall(
+    textContent: string,
+    fileIds: string[],
+    model: string = 'gpt-4.1',
+    role?: string
+  ): Promise<LLMResponse> {
+    const startTime = Date.now();
+    const timestamp = new Date();
+
+    if (this.verbose) {
+      console.log(`\n📚 FILE-BASED Call [${timestamp.toISOString()}]`);
+      console.log(`Model: ${model} | Files: ${fileIds.length}`);
+      console.log(`Text content (${textContent.length} chars):`);
+      console.log('─'.repeat(50));
+      console.log(textContent.length > 500 ? textContent.substring(0, 500) + '...' : textContent);
+      console.log('─'.repeat(50));
+    }
+
+    try {
+      // Build input array with files and text
+      const inputContent = [
+        ...fileIds.map(fileId => ({
+          type: "input_file" as const,
+          file_id: fileId,
+        })),
+        {
+          type: "input_text" as const,
+          text: textContent,
+        },
+      ];
+
+      const response = await this.client.responses.create({
+        model,
+        input: [
+          {
+            role: "user",
+            content: inputContent,
+          },
+        ],
+      });
+
+      const responseContent = response.output_text;
+      if (!responseContent) {
+        throw new Error('No content received from OpenAI file-based call');
+      }
+
+      const duration = Date.now() - startTime;
+      const usage = response.usage ? {
+        prompt_tokens: (response.usage as any).prompt_tokens || 0,
+        completion_tokens: (response.usage as any).completion_tokens || 0,
+        total_tokens: (response.usage as any).total_tokens || 0,
+      } : undefined;
+
+      // Log the call
+      const callLog: LLMCallLog = {
+        timestamp,
+        prompt: `[FILE-BASED] ${textContent}`,
+        model: response.model || model,
+        maxTokens: 0, // Not applicable for responses API
+        temperature: 0, // Not applicable for responses API
+        response: responseContent,
+        usage,
+        duration,
+      };
+      this.callLogs.push(callLog);
+
+      if (this.verbose) {
+        console.log(`\n✅ ${role || 'FILE-BASED'} Response (${duration}ms):`);
+        if (usage) {
+          console.log(`Tokens: ${usage.prompt_tokens} + ${usage.completion_tokens} = ${usage.total_tokens}`);
+        }
+        console.log('─'.repeat(50));
+        console.log(responseContent.length > 500 ? responseContent.substring(0, 500) + '...' : responseContent);
+        console.log('─'.repeat(50));
+      }
+
+      return {
+        content: responseContent,
+        model: response.model || model,
+        usage,
+      };
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      if (this.verbose) {
+        console.log(`\n❌ ${role || 'FILE-BASED'} Error (${duration}ms): ${error}`);
+      }
+      throw new Error(`OpenAI file-based API call failed: ${error}`);
     }
   }
 }

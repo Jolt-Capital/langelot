@@ -1,7 +1,7 @@
 import { OpenAIConnector, LLMResponse } from './connectors/index.js';
 import { parseSubtaskStrategies, parseWorkerResults } from './utils/xml-parser.js';
 import { OrchestratorOptions, SubtaskStrategy, WorkerResult, OrchestratorResult } from './types/index.js';
-import { WebSearchWorker, WebSearchResult } from './workers/index.js';
+import { WebSearchWorker, WebSearchResult, SimpleWorker, LibrarianWorker } from './workers/index.js';
 
 export class FlexibleOrchestrator {
   private connector: OpenAIConnector;
@@ -15,6 +15,9 @@ export class FlexibleOrchestrator {
       temperature: options.temperature || 0.7,
       context: options.context || {},
       enableWebSearch: options.enableWebSearch || false,
+      enableLibrarian: options.enableLibrarian || false,
+      librarianFiles: options.librarianFiles || [],
+      workerType: options.workerType || 'auto',
     };
   }
 
@@ -100,43 +103,18 @@ Provide your synthesis:`;
         throw new Error('Failed to generate subtask strategies');
       }
 
-      // Step 2: Execute worker tasks in parallel
+      // Step 2: Execute worker tasks in parallel based on worker type
       let results: WorkerResult[];
       
-      if (this.options.enableWebSearch) {
-        // Use web search workers
-        const webSearchWorker = new WebSearchWorker(this.connector, {
-          model: this.options.model,
-        });
-
-        const webSearchPromises = strategies.map(strategy =>
-          webSearchWorker.execute(task, strategy.approach, strategy.description, this.options.context)
-        );
-
-        const webSearchResults = await Promise.all(webSearchPromises);
-        results = webSearchResults.map(result => ({
-          approach: result.approach,
-          result: result.result,
-          sources: result.sources,
-          searchPerformed: result.searchPerformed,
-        }));
+      if (this.options.workerType === 'librarian' || this.options.enableLibrarian) {
+        results = await this.executeLibrarianWorkers(strategies, task);
+      } else if (this.options.workerType === 'search' || this.options.enableWebSearch) {
+        results = await this.executeWebSearchWorkers(strategies, task);
+      } else if (this.options.workerType === 'simple') {
+        results = await this.executeSimpleWorkers(strategies, task);
       } else {
-        // Use regular workers
-        const workerPromises = strategies.map((strategy, index) =>
-          this.connector.llmCall(
-            this.getWorkerPrompt(task, strategy.approach, strategy.description),
-            this.options.model,
-            this.options.maxTokens,
-            this.options.temperature,
-            `WORKER-${index + 1} (${strategy.approach})`
-          )
-        );
-
-        const workerResponses = await Promise.all(workerPromises);
-        results = parseWorkerResults(
-          workerResponses.map(r => r.content),
-          strategies.map(s => s.approach)
-        );
+        // Auto mode: choose best worker type based on task
+        results = await this.executeAutoWorkers(strategies, task);
       }
 
       // Step 3: Synthesize results
@@ -158,6 +136,95 @@ Provide your synthesis:`;
 
     } catch (error) {
       throw new Error(`Orchestration failed: ${error}`);
+    }
+  }
+
+  private async executeLibrarianWorkers(strategies: SubtaskStrategy[], task: string): Promise<WorkerResult[]> {
+    if (this.options.librarianFiles.length === 0) {
+      throw new Error('Librarian workers require files to be specified');
+    }
+
+    const librarianWorker = new LibrarianWorker(this.connector, {
+      model: this.options.model,
+      maxTokens: this.options.maxTokens,
+      temperature: this.options.temperature,
+      filePaths: this.options.librarianFiles,
+    });
+
+    await librarianWorker.initialize();
+
+    const librarianPromises = strategies.map(strategy =>
+      librarianWorker.execute(task, strategy.approach, strategy.description, this.options.context)
+    );
+
+    const librarianResults = await Promise.all(librarianPromises);
+    return librarianResults.map(result => ({
+      approach: result.approach,
+      result: result.result,
+      filesUsed: result.filesUsed,
+      workerType: 'librarian' as const,
+      model: result.model,
+      duration: result.duration,
+    }));
+  }
+
+  private async executeWebSearchWorkers(strategies: SubtaskStrategy[], task: string): Promise<WorkerResult[]> {
+    const webSearchWorker = new WebSearchWorker(this.connector, {
+      model: this.options.model,
+    });
+
+    const webSearchPromises = strategies.map(strategy =>
+      webSearchWorker.execute(task, strategy.approach, strategy.description, this.options.context)
+    );
+
+    const webSearchResults = await Promise.all(webSearchPromises);
+    return webSearchResults.map(result => ({
+      approach: result.approach,
+      result: result.result,
+      sources: result.sources,
+      searchPerformed: result.searchPerformed,
+      workerType: 'search' as const,
+    }));
+  }
+
+  private async executeSimpleWorkers(strategies: SubtaskStrategy[], task: string): Promise<WorkerResult[]> {
+    const simpleWorker = new SimpleWorker(this.connector, {
+      model: 'gpt-4.1-mini',
+      maxTokens: this.options.maxTokens,
+      temperature: this.options.temperature,
+    });
+
+    const simplePromises = strategies.map(strategy =>
+      simpleWorker.execute(task, strategy.approach, strategy.description, this.options.context)
+    );
+
+    const simpleResults = await Promise.all(simplePromises);
+    return simpleResults.map(result => ({
+      approach: result.approach,
+      result: result.result,
+      workerType: 'simple' as const,
+      model: result.model,
+      duration: result.duration,
+    }));
+  }
+
+  private async executeAutoWorkers(strategies: SubtaskStrategy[], task: string): Promise<WorkerResult[]> {
+    // Auto mode logic: determine best worker type based on task characteristics
+    const taskLower = task.toLowerCase();
+    const needsFiles = this.options.librarianFiles.length > 0;
+    const needsWebSearch = /\b(current|latest|recent|today|now|2024|2025)\b/.test(taskLower) ||
+                          /\b(news|price|stock|weather|trends)\b/.test(taskLower);
+    const isSimpleTask = taskLower.length < 100 && !/\b(complex|detailed|comprehensive|analysis)\b/.test(taskLower);
+
+    if (needsFiles) {
+      return await this.executeLibrarianWorkers(strategies, task);
+    } else if (needsWebSearch) {
+      return await this.executeWebSearchWorkers(strategies, task);
+    } else if (isSimpleTask) {
+      return await this.executeSimpleWorkers(strategies, task);
+    } else {
+      // Default to web search for complex tasks
+      return await this.executeWebSearchWorkers(strategies, task);
     }
   }
 }
