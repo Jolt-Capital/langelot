@@ -37,7 +37,7 @@ langelot orchestrate "Create marketing copy for an eco-friendly water bottle"
 
 ```bash
 langelot orchestrate "Design a REST API for a task management system" \
-  --model gpt-4 \
+  --model gpt-4.1 \
   --temperature 0.8 \
   --max-tokens 2000 \
   --context '{"target_audience": "developers", "framework": "Express.js"}' \
@@ -51,7 +51,7 @@ langelot orchestrate "Design a REST API for a task management system" \
 
 ### Options
 
-- `-m, --model <model>` - OpenAI model to use (default: gpt-4)
+- `-m, --model <model>` - OpenAI model to use (default: gpt-4.1)
 - `-t, --temperature <temperature>` - Temperature for LLM calls (default: 0.7)
 - `--max-tokens <tokens>` - Maximum tokens per LLM call (default: 1500)
 - `-c, --context <context>` - Additional context as JSON string
@@ -119,7 +119,8 @@ langelot orchestrate "Create marketing copy for an eco-friendly water bottle" --
 ### API Design
 ```bash
 langelot orchestrate "Design a REST API for user authentication" \
-  --context '{"security": "JWT", "database": "PostgreSQL"}'
+  --context '{"security": "JWT", "database": "PostgreSQL"}' \
+  --model gpt-4.1
 ```
 
 ### Code Review

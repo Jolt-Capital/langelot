@@ -14,7 +14,7 @@ export class Worker {
   constructor(connector: OpenAIConnector, options: WorkerOptions = {}) {
     this.connector = connector;
     this.options = {
-      model: options.model || 'gpt-4',
+      model: options.model || 'gpt-4.1',
       maxTokens: options.maxTokens || 1000,
       temperature: options.temperature || 0.7,
     };

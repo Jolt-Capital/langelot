@@ -26,7 +26,7 @@ program
   .alias('o')
   .description('Execute a task using the orchestrator-workers pattern')
   .argument('<task>', 'Task to be executed')
-  .option('-m, --model <model>', 'OpenAI model to use', 'gpt-4')
+  .option('-m, --model <model>', 'OpenAI model to use', 'gpt-4.1')
   .option('-t, --temperature <temperature>', 'Temperature for LLM calls', '0.7')
   .option('--max-tokens <tokens>', 'Maximum tokens per LLM call', '1500')
   .option('-c, --context <context>', 'Additional context as JSON string')
@@ -55,7 +55,7 @@ program
       // Initialize connector and orchestrator
       const connector = new OpenAIConnector(undefined, options.verbose);
       const orchestratorOptions: OrchestratorOptions = {
-        model: options.model || 'gpt-4',
+        model: options.model || 'gpt-4.1',
         temperature: parseFloat(String(options.temperature || '0.7')),
         maxTokens: parseInt(String(options.maxTokens || '1500')),
         context,

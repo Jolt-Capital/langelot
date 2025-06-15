@@ -9,7 +9,7 @@ export class FlexibleOrchestrator {
   constructor(connector: OpenAIConnector, options: OrchestratorOptions = {}) {
     this.connector = connector;
     this.options = {
-      model: options.model || 'gpt-4',
+      model: options.model || 'gpt-4.1',
       maxTokens: options.maxTokens || 1500,
       temperature: options.temperature || 0.7,
       context: options.context || {},

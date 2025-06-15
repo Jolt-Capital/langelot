@@ -51,7 +51,7 @@ export class OpenAIConnector {
 
   async llmCall(
     prompt: string,
-    model: string = 'gpt-4',
+    model: string = 'gpt-4.1',
     maxTokens: number = 1000,
     temperature: number = 0.7,
     role?: string
